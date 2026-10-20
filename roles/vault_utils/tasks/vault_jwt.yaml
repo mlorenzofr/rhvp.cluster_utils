@@ -71,16 +71,26 @@
     jwt_config_default_role: "{{ jwt_discovery_config.data.default_role }}"
   when: jwt_discovery
 
-- name: Get OIDC discovery certificate
+- name: Get OpenShift service CA for OIDC discovery
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: openshift-service-ca.crt
+    namespace: "{{ vault_ns }}"
+  register: openshift_service_ca_cm
+  when: not vault_auth_jwt or
+        not jwt_discovery or
+        not jwt_config_oidc_discovery_url == oidc_discovery_url or
+        not jwt_config_default_role == default_role | default('default')
+
+- name: Write OIDC discovery CA certificate to vault pod
   kubernetes.core.k8s_exec:
     namespace: "{{ vault_ns }}"
     pod: "{{ vault_pod }}"
-    command: >
-      bash -e -c
-      "echo -n | openssl s_client -connect {{ oidc_discovery_host }}:{{ oidc_discovery_port }} -servername {{ oidc_discovery_host }}
-      | openssl x509 -outform PEM > /tmp/oidc-discovery-certificate.pem"
-  retries: 10
-  delay: 30
+    command:
+      - /bin/sh
+      - -c
+      - "echo {{ openshift_service_ca_cm.resources[0].data['service-ca.crt'] | b64encode }} | base64 -d > /tmp/oidc-discovery-certificate.pem"
   when: not vault_auth_jwt or
         not jwt_discovery or
         not jwt_config_oidc_discovery_url == oidc_discovery_url or
